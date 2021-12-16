@@ -7,7 +7,9 @@
 #include <sstream>
 #include <iostream>
 #include "GameParticipant.h"
+#include "GameParticipantBot.h"
 #include "GameModelChangeHandler.h"
+#include "GameParticipantFactory.h"
 #include "GameBaseException.h"
 
 class GameModel {
@@ -15,9 +17,13 @@ protected:
     int currentGameState;
     unsigned fieldSize;
     unsigned lineTargetLength;
+    std::shared_ptr<GameParticipant> firstParticipant;
+    std::shared_ptr<GameParticipant> secondParticipant;
     // value is CELL_VALUE_EMPTY_CELL for empty cells and participant id otherwise
     std::list<std::shared_ptr<GameModelChangeHandler>> changeHandlers;
     int **field;
+    std::string indicationMessage;
+    int emptyCellsCount;
 
     void notifyHandlersStateChange() {
         for (auto it = this->changeHandlers.begin(); it != this->changeHandlers.end(); ++it) {
@@ -44,6 +50,8 @@ protected:
                 field[row][col] = CELL_VALUE_EMPTY_CELL;
             }
         }
+
+        this->emptyCellsCount = fieldSize * fieldSize;
     }
 
     bool detectWinner(unsigned moveRow, unsigned moveCol) {
@@ -144,19 +152,65 @@ protected:
 
     void changeState(const int targetGameState) {
         this->currentGameState = targetGameState;
+        switch (this->currentGameState) {
+            case GAME_STATE_GAME_TURN_FIRST_PARTICIPANT:
+                this->indicationMessage = this->firstParticipant->indicationMessage();
+                break;
+                case GAME_STATE_GAME_TURN_SECOND_PARTICIPANT:
+                this->indicationMessage = this->secondParticipant->indicationMessage();
+                break;
+            default:
+                this->indicationMessage = "";
+        }
+
         this->notifyHandlersStateChange();
     }
 
     void declareError(std::string message) {
         this->notifyHandlersError(message);
     }
+
+    // processing first or second participant's move in generic way
+    void processParticipantMove(
+            std::shared_ptr<GameParticipant> participant,
+            int participantCellValue,
+            std::string input,
+            int winnerState,
+            int nextMoveState
+    ) {
+        try {
+            std::pair<unsigned, unsigned> rowCol = participant->chooseCell(input, this->fieldSize, this->field, CELL_VALUE_EMPTY_CELL, participantCellValue);
+
+            if (rowCol.first >= this->fieldSize || rowCol.second >= this->fieldSize) {
+                this->declareError("Incorrect row or column. Please retry.");
+            } else if (this->field[rowCol.first][rowCol.second] != CELL_VALUE_EMPTY_CELL) {
+                this->declareError("Cell is not empty. Please retry.");
+            } else {
+                this->field[rowCol.first][rowCol.second] = participantCellValue;
+                this->emptyCellsCount--;
+                if (this->detectWinner(rowCol.first, rowCol.second)) {
+                    this->changeState(winnerState);
+                } else {
+                    if (this->emptyCellsCount > 0) {
+                        this->changeState(nextMoveState);
+                    } else {
+                        this->changeState(GAME_STATE_GAME_TIE);
+                    }
+                }
+            }
+        } catch (GameBaseException &exception) {
+            this->declareError(exception.what());
+        }
+    }
+
 public:
+    static const constexpr char *GAME_PARTICIPANT_CODE_DEFAULT = GameParticipantBot::GAME_PARTICIPANT_CODE;
     static const unsigned FIELD_SQUARE_SIZE_DEFAULT = 3;
     static const unsigned LINE_TARGET_LENGTH_DEFAULT = 3;
 
     static const int CELL_VALUE_EMPTY_CELL = -1;
-    static const int CELL_VALUE_HUMAN_CELL = 1;
-    static const int CELL_VALUE_BOT_CELL = 2;
+    static const int CELL_VALUE_SECOND_PARTICIPANT = 1;
+    static const int CELL_VALUE_FIRST_PARTICIPANT = 2;
 
     // do we want to start a new game party?
     static const int GAME_STATE_GAME_LOBBY = 0;
@@ -165,16 +219,19 @@ public:
     // getting the target line length
     static const int GAME_STATE_GAME_PARTY_CONFIGURATION_LINE_LENGTH = 2;
     // getting the first participant
-    static const int GAME_STATE_GAME_PARTY_CONFIGURATION_WHO_IS_FIRST_PLAYER = 3;
-    static const int GAME_STATE_GAME_IN_PROGRESS_TURN_BOT = 4;
-    static const int GAME_STATE_GAME_IN_PROGRESS_TURN_HUMAN = 5;
-    static const int GAME_STATE_GAME_WINNER_HUMAN = 6;
-    static const int GAME_STATE_GAME_WINNER_BOT = 7;
-    static const int GAME_STATE_GAME_STOPPED_BY_PLAYER = 8;
+    static const int GAME_STATE_GAME_PARTY_CONFIGURATION_FIRST_PARTICIPANT = 3;
+    static const int GAME_STATE_GAME_PARTY_CONFIGURATION_SECOND_PARTICIPANT = 4;
+    static const int GAME_STATE_GAME_TURN_FIRST_PARTICIPANT = 5;
+    static const int GAME_STATE_GAME_TURN_SECOND_PARTICIPANT = 6;
+    static const int GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT = 7;
+    static const int GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT = 8;
+    static const int GAME_STATE_GAME_TIE = 9;
+    static const int GAME_STATE_GAME_STOPPED_BY_PLAYER = 10;
 
     GameModel() {
         this->currentGameState = GAME_STATE_GAME_LOBBY;
         this->field = nullptr;
+        this->emptyCellsCount = 0;
         this->fieldSize = 0;
         this->lineTargetLength = 0;
     }
@@ -184,7 +241,6 @@ public:
     }
 
     void processInput(std::string &input) {
-        std::stringstream stringstream(input);
         switch (this->currentGameState) {
             case GAME_STATE_GAME_LOBBY: {
                 if (input == "stop") {
@@ -195,6 +251,7 @@ public:
                 break;
             }
             case GAME_STATE_GAME_PARTY_CONFIGURATION_FIELD_SIZE : {
+                std::stringstream stringstream(input);
                 unsigned fieldSquareSize;
                 stringstream >> fieldSquareSize;
                 if (input.empty() || stringstream.fail()) {
@@ -206,74 +263,58 @@ public:
                 break;
             }
             case GAME_STATE_GAME_PARTY_CONFIGURATION_LINE_LENGTH : {
+                std::stringstream stringstream(input);
                 unsigned lineTargetLength;
                 stringstream >> lineTargetLength;
                 if (input.empty() || stringstream.fail()) {
                     lineTargetLength = LINE_TARGET_LENGTH_DEFAULT;
                 }
                 this->lineTargetLength = lineTargetLength;
-                this->changeState(GAME_STATE_GAME_PARTY_CONFIGURATION_WHO_IS_FIRST_PLAYER);
+                this->changeState(GAME_STATE_GAME_PARTY_CONFIGURATION_FIRST_PARTICIPANT);
                 break;
             }
-            case GAME_STATE_GAME_PARTY_CONFIGURATION_WHO_IS_FIRST_PLAYER : {
-                if (input != "bot") {
-                    this->changeState(GAME_STATE_GAME_IN_PROGRESS_TURN_HUMAN);
-                } else {
-                    this->changeState(GAME_STATE_GAME_IN_PROGRESS_TURN_BOT);
+            case GAME_STATE_GAME_PARTY_CONFIGURATION_FIRST_PARTICIPANT : {
+                try {
+                    this->firstParticipant = GameParticipantFactory::getInstance().create(input);
+                } catch (GameBaseException &exception) {
+                    this->firstParticipant = GameParticipantFactory::getInstance().create(
+                            GAME_PARTICIPANT_CODE_DEFAULT);
                 }
+                this->changeState(GAME_STATE_GAME_PARTY_CONFIGURATION_SECOND_PARTICIPANT);
                 break;
             }
-            case GAME_STATE_GAME_IN_PROGRESS_TURN_BOT : {
-                // we are choosing the first empty cell
-                // a better algorithm can exist :)
-                bool movePerformed = false;
-                unsigned moveRow;
-                unsigned moveCol;
-                for (unsigned row = 0; row < this->fieldSize && !movePerformed; ++row) {
-                    for (unsigned col = 0; col < this->fieldSize && !movePerformed; ++col) {
-                        if (this->field[row][col] == CELL_VALUE_EMPTY_CELL) {
-                            moveRow = row;
-                            moveCol = col;
-                            this->field[moveRow][moveCol] = CELL_VALUE_BOT_CELL;
-                            movePerformed = true;
-                        }
-                    }
+            case GAME_STATE_GAME_PARTY_CONFIGURATION_SECOND_PARTICIPANT : {
+                try {
+                    this->secondParticipant = GameParticipantFactory::getInstance().create(input);
+                } catch (GameBaseException &exception) {
+                    this->secondParticipant = GameParticipantFactory::getInstance().create(
+                            GAME_PARTICIPANT_CODE_DEFAULT);
                 }
+                this->changeState(GAME_STATE_GAME_TURN_FIRST_PARTICIPANT);
+                break;
+            }
+            case GAME_STATE_GAME_TURN_FIRST_PARTICIPANT : {
+                this->processParticipantMove(this->firstParticipant, CELL_VALUE_FIRST_PARTICIPANT, input,
+                                             GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT,
+                                             GAME_STATE_GAME_TURN_SECOND_PARTICIPANT);
 
-                bool botWinner = this->detectWinner(moveRow, moveCol);
-                if (botWinner) {
-                    this->changeState(GAME_STATE_GAME_WINNER_BOT);
-                } else {
-                    this->changeState(GAME_STATE_GAME_IN_PROGRESS_TURN_HUMAN);
-                }
                 break;
             }
-            case GAME_STATE_GAME_IN_PROGRESS_TURN_HUMAN : {
-                unsigned rowPlusOne;
-                unsigned colPlusOne;
-                stringstream >> rowPlusOne >> colPlusOne;
-                if (input.empty() || stringstream.fail()) {
-                    this->declareError("Input unrecognized. Please retry.");
-                } else if (rowPlusOne > this->fieldSize || colPlusOne > this->fieldSize) {
-                    this->declareError("Incorrect row or column. Please retry.");
-                } else if (this->field[rowPlusOne - 1][colPlusOne - 1] != CELL_VALUE_EMPTY_CELL) {
-                    this->declareError("Cell is not empty. Please retry.");
-                } else {
-                    this->field[rowPlusOne - 1][colPlusOne - 1] = CELL_VALUE_HUMAN_CELL;
-                    bool humanWinner = this->detectWinner(rowPlusOne - 1, colPlusOne - 1);
-                    if (humanWinner) {
-                        this->changeState(GAME_STATE_GAME_WINNER_HUMAN);
-                    } else {
-                        this->changeState(GAME_STATE_GAME_IN_PROGRESS_TURN_BOT);
-                    }
-                }
+            case GAME_STATE_GAME_TURN_SECOND_PARTICIPANT : {
+                this->processParticipantMove(this->secondParticipant, CELL_VALUE_SECOND_PARTICIPANT, input,
+                                             GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT,
+                                             GAME_STATE_GAME_TURN_FIRST_PARTICIPANT);
                 break;
             }
-            case GAME_STATE_GAME_WINNER_BOT : {
+            case GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT : {
                 this->changeState(GAME_STATE_GAME_LOBBY);
                 break;
             }
-            case GAME_STATE_GAME_WINNER_HUMAN : {
+            case GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT : {
+                this->changeState(GAME_STATE_GAME_LOBBY);
+                break;
+            }
+            case GAME_STATE_GAME_TIE: {
                 this->changeState(GAME_STATE_GAME_LOBBY);
                 break;
             }
@@ -293,6 +334,7 @@ public:
             field = nullptr;
         }
         this->fieldSize = 0;
+        this->emptyCellsCount = 0;
         this->lineTargetLength = 0;
     }
 
@@ -314,18 +356,32 @@ public:
     }
 
     bool isFinished() const {
-        return this->currentGameState == GAME_STATE_GAME_WINNER_HUMAN
-               || this->currentGameState == GAME_STATE_GAME_WINNER_BOT
-               || this->currentGameState == GAME_STATE_GAME_STOPPED_BY_PLAYER;
+        return this->currentGameState == GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT
+               || this->currentGameState == GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT
+               || this->currentGameState == GAME_STATE_GAME_STOPPED_BY_PLAYER
+               || this->currentGameState == GAME_STATE_GAME_TIE;
     }
 
     bool isContinueWithAnotherParty() const {
-        return this->currentGameState == GAME_STATE_GAME_WINNER_BOT
-               || this->currentGameState == GAME_STATE_GAME_WINNER_HUMAN;
+        return this->currentGameState == GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT
+               || this->currentGameState == GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT
+               || this->currentGameState == GAME_STATE_GAME_TIE;
     }
 
     bool isExpectingInput() const {
-        return this->currentGameState != GAME_STATE_GAME_IN_PROGRESS_TURN_BOT;
+        // input is always expected except if the participant does not need it (the bot case)
+        switch (this->currentGameState) {
+            case GAME_STATE_GAME_TURN_FIRST_PARTICIPANT:
+                return this->firstParticipant->isExpectingInput();
+            case GAME_STATE_GAME_TURN_SECOND_PARTICIPANT:
+                return this->secondParticipant->isExpectingInput();
+            default:
+                return true;
+        }
+    }
+
+    std::string &getIndicationMessage() {
+        return this->indicationMessage;
     }
 };
 

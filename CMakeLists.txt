@@ -16,6 +16,14 @@ add_executable(OOP_Exercise_4
         GameParticipantBot.h
         GameParticipantHuman.h
         GameParticipantHuman.cpp
+        GameBaseException.cpp
+        GameBaseException.h
+        GameController.cpp
         ConsoleGameView.h
         ConsoleGameView.cpp
-        GameBaseException.cpp GameBaseException.h GameController.cpp)
+        GameParticipantFactory.cpp
+        GameParticipantFactory.h
+        GameParticipantCreator.cpp
+        GameParticipantCreator.h
+        GameParticipantCreatorConcrete.cpp
+        GameParticipantCreatorConcrete.h)        

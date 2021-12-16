@@ -16,18 +16,18 @@ protected:
         switch (value) {
             case GameModel::CELL_VALUE_EMPTY_CELL:
                 return EMPTY_CELL_SYMBOL;
-            case GameModel::CELL_VALUE_HUMAN_CELL:
-                return PLAYER_SYMBOL_HUMAN;
-            case GameModel::CELL_VALUE_BOT_CELL:
-                return PLAYER_SYMBOL_BOT;
+            case GameModel::CELL_VALUE_FIRST_PARTICIPANT:
+                return PLAYER_SYMBOL_FIRST_PARTICIPANT;
+            case GameModel::CELL_VALUE_SECOND_PARTICIPANT:
+                return PLAYER_SYMBOL_SECOND_PARTICIPANT;
             default:
                 throw GameBaseException("Unreachable section");
         }
     }
 
 public:
-    static const char PLAYER_SYMBOL_HUMAN = 'X';
-    static const char PLAYER_SYMBOL_BOT = 'O';
+    static const char PLAYER_SYMBOL_FIRST_PARTICIPANT = 'X';
+    static const char PLAYER_SYMBOL_SECOND_PARTICIPANT = 'O';
     static const char EMPTY_CELL_SYMBOL = '_';
 
     ConsoleGameView() {
@@ -66,31 +66,48 @@ public:
             case GameModel::GAME_STATE_GAME_PARTY_CONFIGURATION_LINE_LENGTH :
                 std::cout << "Input line target length [" << GameModel::LINE_TARGET_LENGTH_DEFAULT << "]:" << std::endl;
                 break;
-            case GameModel::GAME_STATE_GAME_PARTY_CONFIGURATION_WHO_IS_FIRST_PLAYER :
-                std::cout << "How starts first? [player] Input 'bot' for the computer to start first." << std::endl;
+            case GameModel::GAME_STATE_GAME_PARTY_CONFIGURATION_FIRST_PARTICIPANT :
+                std::cout << "Who is the first player? [bot] Input 'bot' for the computer and 'human' for the human."
+                          << std::endl;
                 break;
-            case GameModel::GAME_STATE_GAME_IN_PROGRESS_TURN_BOT :
-                std::cout << "Computer's turn." << std::endl;
+            case GameModel::GAME_STATE_GAME_PARTY_CONFIGURATION_SECOND_PARTICIPANT :
+                std::cout << "What is the second player? [bot] Input 'bot' for the computer and 'human' for the human."
+                          << std::endl;
                 break;
-            case GameModel::GAME_STATE_GAME_IN_PROGRESS_TURN_HUMAN :
-                std::cout << "Player's turn. Here is the current state of the field:" << std::endl;
-                this->printField();
-                std::cout << "Input target row and column separated with a space (for example, top right cell is 1 3 in 3x3 grid):" << std::endl;
-                break;
-            case GameModel::GAME_STATE_GAME_WINNER_BOT :
-                std::cout << "Computer is the winner!" << std::endl;
+            case GameModel::GAME_STATE_GAME_TURN_FIRST_PARTICIPANT :
+                std::cout << "First player's turn (playing with " << PLAYER_SYMBOL_FIRST_PARTICIPANT
+                          << "). Here is the current state of the field:" << std::endl;
                 this->printField();
                 break;
-            case GameModel::GAME_STATE_GAME_WINNER_HUMAN :
-                std::cout << "Player is the winner!" << std::endl;
+            case GameModel::GAME_STATE_GAME_TURN_SECOND_PARTICIPANT :
+                std::cout << "Second player's turn (playing with " << PLAYER_SYMBOL_SECOND_PARTICIPANT
+                          << "). Here is the current state of the field:" << std::endl;
+                this->printField();
+                break;
+            case GameModel::GAME_STATE_GAME_WINNER_FIRST_PARTICIPANT :
+                std::cout << "First player (playing with " << PLAYER_SYMBOL_FIRST_PARTICIPANT << ") is the winner!"
+                          << std::endl;
+                this->printField();
+                break;
+            case GameModel::GAME_STATE_GAME_WINNER_SECOND_PARTICIPANT :
+                std::cout << "Second player (playing with " << PLAYER_SYMBOL_SECOND_PARTICIPANT << ") is the winner!"
+                          << std::endl;
+                this->printField();
+                break;
+            case GameModel::GAME_STATE_GAME_TIE :
+                std::cout << "It is a tie for this time!" << std::endl;
                 this->printField();
                 break;
             case GameModel::GAME_STATE_GAME_STOPPED_BY_PLAYER :
-                std::cout << "GameController interrupted by the player." << std::endl;
+                std::cout << "Game stopped by the player." << std::endl;
                 break;
             default:
                 std::cout << "Unexpected state" << std::endl;
                 break;
+        }
+
+        if (!this->gameModel->getIndicationMessage().empty()) {
+            std::cout << "Indication: " << this->gameModel->getIndicationMessage() << std::endl;
         }
     }
 };
